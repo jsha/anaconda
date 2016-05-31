@@ -144,6 +144,7 @@ type Stream struct {
 	api TwitterApi
 	C   chan interface{}
 	run bool
+	raw bool
 }
 
 func (s *Stream) listen(response http.Response) {
@@ -151,7 +152,7 @@ func (s *Stream) listen(response http.Response) {
 		defer response.Body.Close()
 	}
 
-	s.api.Log.Notice("Listenning to twitter socket")
+	s.api.Log.Notice("Listening to twitter socket")
 	defer s.api.Log.Notice("twitter socket closed, leaving loop")
 
 	scanner := bufio.NewScanner(response.Body)
@@ -160,6 +161,8 @@ func (s *Stream) listen(response http.Response) {
 		j := scanner.Bytes()
 		if len(j) == 0 {
 			s.api.Log.Debug("Empty bytes... Moving along")
+		} else if s.raw {
+			s.C <- j
 		} else {
 			s.C <- jsonToKnownType(j)
 		}
@@ -256,36 +259,43 @@ func (s *Stream) start(urlStr string, v url.Values, method int) {
 	go s.loop(urlStr, v, method)
 }
 
-func (a TwitterApi) newStream(urlStr string, v url.Values, method int) *Stream {
+func (a TwitterApi) newStream(urlStr string, v url.Values, method int, raw bool) *Stream {
 	stream := Stream{
 		api: a,
 		C:   make(chan interface{}),
+		raw: raw,
 	}
 	stream.start(urlStr, v, method)
 	return &stream
 }
 
 func (a TwitterApi) UserStream(v url.Values) (stream *Stream) {
-	return a.newStream(BaseUrlUserStream+"/user.json", v, _GET)
+	return a.newStream(BaseUrlUserStream+"/user.json", v, _GET, false)
 }
 
 func (a TwitterApi) PublicStreamSample(v url.Values) (stream *Stream) {
-	return a.newStream(BaseUrlStream+"/statuses/sample.json", v, _GET)
+	return a.newStream(BaseUrlStream+"/statuses/sample.json", v, _GET, false)
 }
 
 // XXX: To use this API authority is requied. but I dont have this. I cant test.
 func (a TwitterApi) PublicStreamFirehose(v url.Values) (stream *Stream) {
-	return a.newStream(BaseUrlStream+"/statuses/firehose.json", v, _GET)
+	return a.newStream(BaseUrlStream+"/statuses/firehose.json", v, _GET, false)
 }
 
 // XXX: PublicStream(Track|Follow|Locations) func is needed?
 func (a TwitterApi) PublicStreamFilter(v url.Values) (stream *Stream) {
-	return a.newStream(BaseUrlStream+"/statuses/filter.json", v, _POST)
+	return a.newStream(BaseUrlStream+"/statuses/filter.json", v, _POST, false)
 }
 
 // XXX: To use this API authority is requied. but I dont have this. I cant test.
 func (a TwitterApi) SiteStream(v url.Values) (stream *Stream) {
-	return a.newStream(BaseUrlSiteStream+"/site.json", v, _GET)
+	return a.newStream(BaseUrlSiteStream+"/site.json", v, _GET, false)
+}
+
+// RawStream returns a stream that emits unparsed bytes on its channel, one emit
+// per line of input from the Twitter API.
+func (a TwitterApi) RawStream(url string, v url.Values) (stream *Stream) {
+	return a.newStream(url, v, _GET, true)
 }
 
 func jsonAsStruct(j []byte, path string, obj interface{}) (res bool) {
